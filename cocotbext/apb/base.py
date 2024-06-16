@@ -279,7 +279,9 @@ class APBMasterDriver(BusDriver):
         Drives data onto the APB bus to setup for read/write to slave devices.
     """
 
-    def __init__(self, entity, name, clock, pkg=False, signals=None, **kwargs):
+    def __init__(self, entity, name, clock, pkg=False, signals=None, spec_rev="APB3", **kwargs):
+        
+        self.spec_rev = spec_rev
 
         # has the signals been explicitely defined?
         if signals:
@@ -310,9 +312,11 @@ class APBMasterDriver(BusDriver):
                     "PREADY"]
 
                 self._optional_signals = [
-                    "PSLVERR",
-                    "PSTRB"]
+                    "PSLVERR"]
 
+        # TODO make it enum
+        if self.spec_rev == "APB4":
+            self._optional_signals.append("PSTRB")
 
         # inheret the bus driver
         BusDriver.__init__(self, entity, name, clock, bus_separator='.', **kwargs)
@@ -324,7 +328,8 @@ class APBMasterDriver(BusDriver):
         self.bus.PSEL.setimmediatevalue(0)
         self.bus.PENABLE.setimmediatevalue(0)
         self.bus.PWDATA.setimmediatevalue(0)
-        self.bus.PSTRB.setimmediatevalue(0)
+        if self.spec_rev == "APB4":
+            self.bus.PSTRB.setimmediatevalue(0)
 
         self.reset()
 
@@ -380,25 +385,25 @@ class APBMasterDriver(BusDriver):
         while len(self.transmit_queue) > 0 or state != 'IDLE':
 
             if state == 'SETUP':
-
                 # get a new transaction from the queue
                 current_transaction = self.transmit_queue.popleft()
                 current_transaction.start_time = cocotb.utils.get_sim_time('ns')
 
                 # assign values in the control phase
-                self.bus.PSEL   <= 1
-                self.bus.PADDR  <= current_transaction.address
-                self.bus.PWRITE <= pwrite.index(current_transaction.direction)
+                self.bus.PSEL.value   = 1
+                self.bus.PADDR.value  = current_transaction.address
+                self.bus.PWRITE.value = pwrite.index(current_transaction.direction)
 
                 # create the PSTRB signal
-                pstrb_int = 0
-                for i, pstrb_i in enumerate(current_transaction.strobe):
-                    pstrb_int += pstrb_i << i
-                self.bus.PSTRB  <= pstrb_int
+                if self.spec_rev == "APB4":
+                    pstrb_int = 0
+                    for i, pstrb_i in enumerate(current_transaction.strobe):
+                        pstrb_int += pstrb_i << i
+                    self.bus.PSTRB.value  = pstrb_int
 
                 # write the data to the bus
                 if current_transaction.direction == 'WRITE':
-                    self.bus.PWDATA <= current_transaction.data
+                    self.bus.PWDATA.value = current_transaction.data
 
                 # update state
                 state = 'ACCESS'
@@ -406,7 +411,7 @@ class APBMasterDriver(BusDriver):
             elif state == 'ACCESS':
 
                 # tell the slave we're ready for the access phase
-                self.bus.PENABLE <= 1
+                self.bus.PENABLE.value = 1
 
                 state = 'SAMPLE'
 
@@ -431,13 +436,13 @@ class APBMasterDriver(BusDriver):
                         state = 'SETUP'
                     else:
                         state = 'IDLE'
-                    self.bus.PENABLE <= 0
+                    self.bus.PENABLE.value = 0
 
         # reset the bus signals
-        self.bus.PWDATA  <= 0
-        self.bus.PWRITE  <= 0
-        self.bus.PSEL    <= 0
-        self.bus.PENABLE <= 0
+        self.bus.PWDATA.value  = 0
+        self.bus.PWRITE.value  = 0
+        self.bus.PSEL.value    = 0
+        self.bus.PENABLE.value = 0
 
         self.transfer_busy = False
 
